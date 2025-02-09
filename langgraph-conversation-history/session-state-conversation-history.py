@@ -111,4 +111,4 @@ user_input = st.text_input("Enter your message:", key="user_input", on_change=pr
 # Button to start a new conversation
 if st.button("Start New Conversation"):
     st.session_state.conversation_state = {"messages": [], "input": ""}
-    st.experimental_rerun()
+    st.rerun()

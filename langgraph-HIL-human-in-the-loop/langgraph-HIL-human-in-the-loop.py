@@ -4,6 +4,11 @@ from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 import uvicorn
 import json
+import os
+from dotenv import load_dotenv
+
+# Load environment variables from .env file
+load_dotenv()
 
 # Define Request/Response models
 class UserInput(BaseModel):
@@ -80,18 +85,8 @@ def uploader(state: WorkflowState) -> Dict:
 
 # Create and configure the graph
 def create_workflow() -> StateGraph:
-    workflow_state = {
-        "details": List[str],
-        "current_detail_index": int,
-        "transformed_data": Optional[str],
-        "is_transform_approved": bool,
-        "is_uploaded": bool,
-        "last_message": str,
-        "required_action": str
-    }
-    
-    graph = StateGraph(workflow_state)
-    
+    graph = StateGraph(WorkflowState)
+
     # Add nodes
     graph.add_node("info_collector", info_collector)
     graph.add_node("transformer", transformer)
@@ -128,43 +123,47 @@ active_sessions: Dict[str, WorkflowState] = {}
 
 @app.post("/workflow/{session_id}")
 async def handle_workflow(session_id: str, user_input: UserInput) -> WorkflowResponse:
-    # Get or create session state
-    if session_id not in active_sessions:
-        active_sessions[session_id] = get_initial_state()
-    
-    state = active_sessions[session_id]
-    
-    # Handle user input based on current state and action
-    if user_input.action == "start":
-        # Reset or initialize the session
-        active_sessions[session_id] = get_initial_state()
+    try:
+        # Get or create session state
+        if session_id not in active_sessions:
+            active_sessions[session_id] = get_initial_state()
+        
         state = active_sessions[session_id]
-    
-    elif user_input.action == "provide_detail":
-        if state["required_action"] == "provide_detail":
-            state["details"].append(user_input.input)
-            state["current_detail_index"] += 1
-    
-    elif user_input.action == "modify_transform":
-        if state["required_action"] == "approve_transform":
-            if user_input.input:  # If input provided, modify the transformation
-                state["transformed_data"] = user_input.input
-            state["is_transform_approved"] = True
-    
-    elif user_input.action == "confirm_upload":
-        if state["required_action"] == "confirm_upload":
-            state["is_uploaded"] = True
-    
-    # Process workflow
-    result = workflow.invoke(state)
-    state.update(result)
-    active_sessions[session_id] = state
-    
-    return WorkflowResponse(
-        message=state["last_message"],
-        required_action=state["required_action"],
-        current_state=dict(state)
-    )
+        
+        # Handle user input based on current state and action
+        if user_input.action == "start":
+            # Reset or initialize the session
+            active_sessions[session_id] = get_initial_state()
+            state = active_sessions[session_id]
+        
+        elif user_input.action == "provide_detail":
+            if state["required_action"] == "provide_detail":
+                state["details"].append(user_input.input)
+                state["current_detail_index"] += 1
+        
+        elif user_input.action == "modify_transform":
+            if state["required_action"] == "approve_transform":
+                if user_input.input:  # If input provided, modify the transformation
+                    state["transformed_data"] = user_input.input
+                state["is_transform_approved"] = True
+        
+        elif user_input.action == "confirm_upload":
+            if state["required_action"] == "confirm_upload":
+                state["is_uploaded"] = True
+        
+        # Process workflow
+        result = workflow.invoke(state)
+        state.update(result)
+        active_sessions[session_id] = state
+        
+        return WorkflowResponse(
+            message=state["last_message"],
+            required_action=state["required_action"],
+            current_state=dict(state)
+        )
+    except Exception as e:
+        print(f"Error handling workflow: {e}")
+        raise HTTPException(status_code=500, detail="Internal Server Error")
 
 # Health check endpoint
 @app.get("/health")
@@ -178,5 +177,6 @@ async def get_sessions():
 
 if __name__ == "__main__":
     print("Starting LangGraph Interactive Server...")
-    print("Access the API documentation at http://localhost:8000/docs")
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    port = int(os.getenv("PORT", 8080))
+    print(f"Access the API documentation at http://localhost:{port}/docs")
+    uvicorn.run(app, host="0.0.0.0", port=port)

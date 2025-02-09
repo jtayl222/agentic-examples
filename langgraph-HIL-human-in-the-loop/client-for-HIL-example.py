@@ -1,10 +1,16 @@
 import requests
 import json
 from typing import Dict, Any
+import os
+from dotenv import load_dotenv
+
+# Load environment variables from .env file
+load_dotenv()
 
 class WorkflowClient:
-    def __init__(self, base_url: str = "http://localhost:8000"):
-        self.base_url = base_url
+    def __init__(self, base_url: str = None):
+        port = os.getenv("PORT", "8080")
+        self.base_url = base_url or f"http://localhost:{port}"
         self.session_id = "test_session"  # You can make this dynamic
     
     def send_request(self, input_text: str, action: str) -> Dict[str, Any]:

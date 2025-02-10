@@ -3,6 +3,7 @@ import json
 from typing import Dict, Any
 import os
 from dotenv import load_dotenv
+import streamlit as st
 
 # Load environment variables from .env file
 load_dotenv()
@@ -23,59 +24,60 @@ class WorkflowClient:
         response = requests.post(url, json=payload)
         response.raise_for_status()
         return response.json()
-    
-    def run_interactive_workflow(self):
-        """Run the workflow interactively with user input"""
-        print("Starting workflow...")
-        
-        while True:
-            try:
-                # Start or continue workflow
-                response = self.send_request("", "start")
-                print(f"\nServer: {response['message']}")
-                
-                if response['required_action'] == "complete":
-                    print("Workflow completed!")
-                    break
-                
-                # Handle different required actions
-                if response['required_action'] == "provide_detail":
-                    user_input = input("Please enter the requested detail: ")
-                    response = self.send_request(user_input, "provide_detail")
-                
-                elif response['required_action'] == "approve_transform":
-                    print("\nTransformed data:", response['current_state'].get('transformed_data'))
-                    choice = input("Do you want to modify the transformation? (yes/no): ")
-                    
-                    if choice.lower() == 'yes':
-                        new_transform = input("Enter modified transformation: ")
-                        response = self.send_request(new_transform, "modify_transform")
-                    else:
-                        response = self.send_request("", "modify_transform")
-                
-                elif response['required_action'] == "confirm_upload":
-                    choice = input("Confirm upload? (yes/no): ")
-                    if choice.lower() == 'yes':
-                        response = self.send_request("", "confirm_upload")
-                
-                print("\nCurrent state:", json.dumps(response['current_state'], indent=2))
-                
-            except requests.exceptions.RequestException as e:
-                print(f"Error communicating with server: {e}")
-                break
-            except KeyboardInterrupt:
-                print("\nWorkflow interrupted by user")
-                break
 
 def main():
-    client = WorkflowClient()
-    print("Interactive Workflow Client")
-    print("==========================")
-    print("This client will guide you through the workflow steps.")
-    print("You can press Ctrl+C at any time to exit.")
-    print("")
+    st.title("Interactive Workflow Client")
+    st.write("This client will guide you through the workflow steps.")
     
-    client.run_interactive_workflow()
+    client = WorkflowClient()
+    
+    if "state" not in st.session_state:
+        st.session_state.state = None
+    
+    if st.button("Start Workflow") or st.session_state.state is None:
+        response = client.send_request("", "start")
+        st.session_state.state = response
+        st.write(f"Server: {response['message']}")
+    
+    if st.session_state.state:
+        response = st.session_state.state
+        
+        if response['required_action'] == "provide_detail":
+            user_input = st.text_input("Please enter the requested detail:")
+            if st.button("Submit Detail"):
+                response = client.send_request(user_input, "provide_detail")
+                st.session_state.state = response
+                st.write(f"Server: {response['message']}")
+        
+        elif response['required_action'] == "approve_transform":
+            st.write(f"Transformed data: {response['current_state'].get('transformed_data')}")
+            choice = st.radio("Do you want to modify the transformation?", ("No", "Yes"))
+            if choice == "Yes":
+                new_transform = st.text_input("Enter modified transformation:")
+                if st.button("Submit Transformation"):
+                    response = client.send_request(new_transform, "modify_transform")
+                    st.session_state.state = response
+                    st.write(f"Server: {response['message']}")
+            else:
+                if st.button("Approve Transformation"):
+                    response = client.send_request("", "modify_transform")
+                    st.session_state.state = response
+                    st.write(f"Server: {response['message']}")
+        
+        elif response['required_action'] == "confirm_upload":
+            choice = st.radio("Confirm upload?", ("No", "Yes"))
+            if choice == "Yes":
+                if st.button("Confirm Upload"):
+                    response = client.send_request("", "confirm_upload")
+                    st.session_state.state = response
+                    st.write(f"Server: {response['message']}")
+        
+        st.write("Current state:")
+        st.json(response['current_state'])
+        
+        if response['required_action'] == "complete":
+            st.write("Workflow completed!")
+            st.session_state.state = None
 
 if __name__ == "__main__":
     main()

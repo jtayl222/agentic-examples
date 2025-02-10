@@ -1,1 +1,4 @@
 .idea/
+rag-with-qdrant/langchain-docs/**
+rag-with-qdrant/**
+/*/.vscode/**

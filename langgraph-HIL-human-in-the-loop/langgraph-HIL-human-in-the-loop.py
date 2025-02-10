@@ -6,9 +6,14 @@ import uvicorn
 import json
 import os
 from dotenv import load_dotenv
+import logging
 
 # Load environment variables from .env file
 load_dotenv()
+
+# Configure logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 # Initialize FastAPI
 app = FastAPI()
@@ -27,83 +32,109 @@ class WorkflowResponse(BaseModel):
 class WorkflowState(TypedDict):
     details: List[str]
     current_detail_index: int
-    transformed_data: Optional[str]
+    transformed_data: Optional[List[str]]
     is_transform_approved: bool
     is_uploaded: bool
     workflow_state: str  # Current state of the workflow
     workflow_message: str  # Current message to display
 
-def process_state(state: WorkflowState) -> Dict[str, Any]:
-    """Process the current state and determine the next action"""
-    current_state = state["workflow_state"]
+def collecting_details(state: WorkflowState) -> Dict[str, Any]:
+    logger.info("Entering collecting_details node")
+    required_details = 4
+    questions = [
+        os.getenv("QUESTION_1"),
+        os.getenv("QUESTION_2"),
+        os.getenv("QUESTION_3"),
+        os.getenv("QUESTION_4")
+    ]
     
-    if current_state == "collecting_details":
-        required_details = 4
-        if state["current_detail_index"] >= required_details:
-            return {
-                "next": "process_details",
-                "workflow_state": "transforming",
-                "workflow_message": "All details collected. Moving to transformation."
-            }
+    if state["current_detail_index"] >= required_details:
+        transformed_data = [f"the transformed data is {detail}" for detail in state["details"]]
+        state["transformed_data"] = transformed_data
+        logger.info("Exiting collecting_details node")
         return {
-            "next": "process_details",
-            "workflow_state": "collecting_details",
-            "workflow_message": f"Please provide detail #{state['current_detail_index'] + 1}"
+            "next": "transforming",
+            "workflow_state": "transforming",
+            "workflow_message": "All details collected. Moving to transformation."
         }
     
-    elif current_state == "transforming":
-        if not state["is_transform_approved"]:
-            transformed = " | ".join(state["details"])
-            return {
-                "next": "process_details",
-                "workflow_state": "awaiting_approval",
-                "transformed_data": transformed,
-                "workflow_message": f"Data transformed. Result: {transformed}. Do you approve?"
-            }
+    logger.info("Exiting collecting_details node")
+    return {
+        "next": "collecting_details",
+        "workflow_state": "collecting_details",
+        "workflow_message": questions[state["current_detail_index"]]
+    }
+
+def transforming(state: WorkflowState) -> Dict[str, Any]:
+    logger.info("Entering transforming node")
+    if not state["is_transform_approved"]:
+        logger.info("Exiting transforming node")
         return {
-            "next": "process_details",
+            "next": "awaiting_approval",
+            "workflow_state": "awaiting_approval",
+            "workflow_message": f"Data transformed. Result: {state['transformed_data']}. Do you approve?"
+        }
+    logger.info("Exiting transforming node")
+    return {
+        "next": "uploading",
+        "workflow_state": "uploading",
+        "workflow_message": "Transform approved. Moving to upload."
+    }
+
+def awaiting_approval(state: WorkflowState) -> Dict[str, Any]:
+    logger.info("Entering awaiting_approval node")
+    if state["is_transform_approved"]:
+        logger.info("Exiting awaiting_approval node")
+        return {
+            "next": "uploading",
             "workflow_state": "uploading",
             "workflow_message": "Transform approved. Moving to upload."
         }
-    
-    elif current_state == "awaiting_approval":
-        if state["is_transform_approved"]:
-            return {
-                "next": "process_details",
-                "workflow_state": "uploading",
-                "workflow_message": "Transform approved. Moving to upload."
-            }
-        return {
-            "next": "process_details",
-            "workflow_state": "awaiting_approval",
-            "workflow_message": "Awaiting approval of transformation."
-        }
-    
-    elif current_state == "uploading":
-        if state["is_uploaded"]:
-            return {
-                "next": END,
-                "workflow_state": "complete",
-                "workflow_message": "Upload complete. Workflow finished."
-            }
-        return {
-            "next": "process_details",
-            "workflow_state": "uploading",
-            "workflow_message": "Ready to upload. Confirm?"
-        }
-    
+    logger.info("Exiting awaiting_approval node")
     return {
-        "next": END,
-        "workflow_state": "complete",
-        "workflow_message": "Workflow complete."
+        "next": "awaiting_approval",
+        "workflow_state": "awaiting_approval",
+        "workflow_message": "Awaiting approval of transformation."
+    }
+
+def uploading(state: WorkflowState) -> Dict[str, Any]:
+    logger.info("Entering uploading node")
+    if state["is_uploaded"]:
+        logger.info("Exiting uploading node")
+        return {
+            "next": END,
+            "workflow_state": "complete",
+            "workflow_message": "Upload complete. Workflow finished."
+        }
+    logger.info("Exiting uploading node")
+    return {
+        "next": "uploading",
+        "workflow_state": "uploading",
+        "workflow_message": "Ready to upload. Confirm?"
     }
 
 # Create and configure the graph
 def create_workflow() -> StateGraph:
     workflow = StateGraph(WorkflowState)
-    workflow.add_node("process_details", process_state)
-    workflow.set_entry_point("process_details")
-    return workflow.compile()
+    workflow.add_node("collecting_details", collecting_details)
+    workflow.add_node("transforming", transforming)
+    workflow.add_node("awaiting_approval", awaiting_approval)
+    workflow.add_node("uploading", uploading)
+    
+    # Add edges
+    workflow.add_edge("collecting_details", "transforming")
+    workflow.add_edge("transforming", "awaiting_approval")
+    workflow.add_edge("awaiting_approval", "uploading")
+    workflow.add_edge("uploading", END)
+    
+    workflow.set_entry_point("collecting_details")
+    compiledStateGraph = workflow.compile()
+
+    # Print the graph
+    print(compiledStateGraph.get_graph().draw_mermaid())
+    compiledStateGraph.get_graph().draw_png(output_file_path="workflow.png")
+
+    return compiledStateGraph
 
 # Initialize workflow
 workflow = create_workflow()
@@ -148,7 +179,7 @@ async def handle_workflow(session_id: str, user_input: UserInput) -> WorkflowRes
         
         elif user_input.action == "modify_transform" and state["workflow_state"] == "awaiting_approval":
             if user_input.input:
-                state["transformed_data"] = user_input.input
+                state["transformed_data"] = [user_input.input]
             state["is_transform_approved"] = True
         
         elif user_input.action == "confirm_upload" and state["workflow_state"] == "uploading":
@@ -158,6 +189,9 @@ async def handle_workflow(session_id: str, user_input: UserInput) -> WorkflowRes
         result = workflow.invoke(state)
         state.update(result)
         active_sessions[session_id] = state
+
+        # Log the state transition
+        logger.info(f"Session {session_id}: Transitioned to {state['workflow_state']} state.")
         
         return WorkflowResponse(
             message=state["workflow_message"],
@@ -166,7 +200,7 @@ async def handle_workflow(session_id: str, user_input: UserInput) -> WorkflowRes
         )
     
     except Exception as e:
-        print(f"Error handling workflow: {e}")
+        logger.error(f"Error handling workflow for session {session_id}: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail="Internal Server Error")
 
 # Health check endpoint
@@ -180,7 +214,7 @@ async def get_sessions():
     return {"active_sessions": list(active_sessions.keys())}
 
 if __name__ == "__main__":
-    print("Starting LangGraph Interactive Server...")
+    logger.info("Starting LangGraph Interactive Server...")
     port = int(os.getenv("PORT", 8080))
-    print(f"Access the API documentation at http://localhost:{port}/docs")
+    logger.info(f"Access the API documentation at http://localhost:{port}/docs")
     uvicorn.run(app, host="0.0.0.0", port=port)

@@ -1436,6 +1436,17 @@ files = [
 windows-terminal = ["colorama (>=0.4.6)"]
 
 [[package]]
+name = "pygraphviz"
+version = "1.14"
+description = "Python interface to Graphviz"
+optional = false
+python-versions = ">=3.10"
+groups = ["main"]
+files = [
+    {file = "pygraphviz-1.14.tar.gz", hash = "sha256:c10df02377f4e39b00ae17c862f4ee7e5767317f1c6b2dfd04cea6acc7fc2bea"},
+]
+
+[[package]]
 name = "python-dateutil"
 version = "2.9.0.post0"
 description = "Extensions to the standard Python datetime module"
@@ -2084,4 +2095,4 @@ cffi = ["cffi (>=1.11)"]
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.13,<4.0"
-content-hash = "cd7a128fa04e60bf57a8094f4066a3665ba6223e404e59dbb446c4f80baf1f5b"
+content-hash = "e27653a179381ab58c13428cc1044d9b5d2a3a7f88d1a7657873410fab8a3131"

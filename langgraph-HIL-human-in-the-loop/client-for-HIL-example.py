@@ -43,7 +43,8 @@ def main():
         response = st.session_state.state
         
         if response['required_action'] == "provide_detail":
-            user_input = st.text_input("Please enter the requested detail:")
+            st.write(f"Question: {response['message']}")
+            user_input = st.text_input("Your answer:")
             if st.button("Submit Detail"):
                 response = client.send_request(user_input, "provide_detail")
                 st.session_state.state = response
@@ -74,6 +75,12 @@ def main():
         
         st.write("Current state:")
         st.json(response['current_state'])
+        
+        if response['required_action'] != "complete":
+            if st.button("Next"):
+                response = client.send_request("", response['required_action'])
+                st.session_state.state = response
+                st.write(f"Server: {response['message']}")
         
         if response['required_action'] == "complete":
             st.write("Workflow completed!")

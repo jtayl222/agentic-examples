@@ -7,6 +7,9 @@ import json
 import os
 from dotenv import load_dotenv
 import logging
+from langgraph.checkpoint.memory import MemorySaver
+from langgraph.store.memory import InMemoryStore
+from pprint import pformat, pprint
 
 # Load environment variables from .env file
 load_dotenv()
@@ -17,6 +20,10 @@ logger = logging.getLogger(__name__)
 
 # Initialize FastAPI
 app = FastAPI()
+
+# Initialize MemorySaver and InMemoryStore
+memory_saver = MemorySaver()
+store = InMemoryStore()
 
 # Define Request/Response models
 class UserInput(BaseModel):
@@ -81,8 +88,12 @@ def transforming(state: WorkflowState) -> Dict[str, Any]:
         "workflow_message": "Transform approved. Moving to upload."
     }
 
-def awaiting_approval(state: WorkflowState) -> Dict[str, Any]:
+def awaiting_approval(state: WorkflowState, config) -> Dict[str, Any]:
     logger.info("Entering awaiting_approval node")
+    config = {"configurable": {"thread_id": config['metadata']['thread_id']}}
+    sh = list(graph.get_state_history(config))
+    pprint(sh)
+
     if state["is_transform_approved"]:
         logger.info("Exiting awaiting_approval node")
         return {
@@ -128,7 +139,10 @@ def create_workflow() -> StateGraph:
     workflow.add_edge("uploading", END)
     
     workflow.set_entry_point("collecting_details")
-    compiledStateGraph = workflow.compile()
+    compiledStateGraph = workflow.compile(
+        checkpointer=memory_saver, 
+        store=store, 
+        interrupt_before=["collecting_details", "awaiting_approval", "uploading"])
 
     # Print the graph
     print(compiledStateGraph.get_graph().draw_mermaid())
@@ -137,7 +151,7 @@ def create_workflow() -> StateGraph:
     return compiledStateGraph
 
 # Initialize workflow
-workflow = create_workflow()
+graph = create_workflow()
 
 def get_initial_state() -> WorkflowState:
     return WorkflowState(
@@ -186,12 +200,15 @@ async def handle_workflow(session_id: str, user_input: UserInput) -> WorkflowRes
             state["is_uploaded"] = True
         
         # Process workflow
-        result = workflow.invoke(state)
+        result = graph.invoke(state, config={"configurable": {"thread_id": session_id}})
         state.update(result)
         active_sessions[session_id] = state
 
         # Log the state transition
         logger.info(f"Session {session_id}: Transitioned to {state['workflow_state']} state.")
+        config = {"configurable": {"thread_id": session_id}}
+        the_state= graph.get_state(config)
+        logger.info(pformat(f"Session {session_id}: {the_state}"))
         
         return WorkflowResponse(
             message=state["workflow_message"],
